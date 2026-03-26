@@ -26,7 +26,7 @@ export default function PostDetail() {
   const [userId, setUserId] = useState<string | null>(null);
   const [isLiked, setIsLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const postIdParam = params?.id;
   const postId = Array.isArray(postIdParam) ? postIdParam[0] : postIdParam;
@@ -40,22 +40,25 @@ export default function PostDetail() {
       setLoading(true);
       setError("");
 
-      const res = await fetch(`/api/posts/${postId}`);
-      if (!res.ok) throw new Error("Post not found");
+      const res = await fetch(`/api/posts/${encodeURIComponent(postId)}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || "Post not found");
+      }
 
       const data = await res.json();
       setPost(data);
 
       // Fetch like status
-      const userId = localStorage.getItem("userId");
-      const likeRes = await fetch(`/api/likes?post_id=${encodeURIComponent(postId)}&user_id=${encodeURIComponent(userId || "")}`);
+      const currentUserId = localStorage.getItem("userId");
+      const likeRes = await fetch(`/api/likes?post_id=${encodeURIComponent(postId)}&user_id=${encodeURIComponent(currentUserId || "")}`);
       if (likeRes.ok) {
         const likeData = await likeRes.json();
         setIsLiked(likeData.isLiked);
         setLikeCount(likeData.likeCount);
       }
     } catch (err) {
-      setError("Failed to load post");
+      setError(err instanceof Error ? err.message : "Failed to load post");
       console.error(err);
     } finally {
       setLoading(false);
@@ -65,13 +68,17 @@ export default function PostDetail() {
   useEffect(() => {
     const id = localStorage.getItem("userId");
     setUserId(id);
-    if (postId) {
-      fetchPost();
+    if (!postId) {
+      setError("Invalid post link");
+      setLoading(false);
+      return;
     }
+
+    fetchPost();
   }, [fetchPost, postId]);
 
   const handleLike = async () => {
-    if (!userId) {
+    if (!userId || !postId) {
       alert("Please login to like posts");
       router.push("/login");
       return;
@@ -94,7 +101,7 @@ export default function PostDetail() {
 
   const handleCommentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userId) {
+    if (!userId || !postId) {
       alert("Please login to comment");
       router.push("/login");
       return;
@@ -134,6 +141,36 @@ export default function PostDetail() {
     }
   };
 
+  const handleDeletePost = async () => {
+    if (!postId || !userId) {
+      return;
+    }
+
+    if (!confirm("Delete this post? This action cannot be undone.")) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/posts/${encodeURIComponent(postId)}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ author_id: userId }),
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        alert(data?.error || "Failed to delete post");
+        return;
+      }
+
+      router.push("/");
+    } catch (err) {
+      console.error(err);
+      alert("Failed to delete post");
+    }
+  };
+
   if (loading) return <div className="min-h-screen flex items-center justify-center"><p>Loading...</p></div>;
   if (error) return <div className="min-h-screen flex items-center justify-center"><p className="text-red-500">{error}</p></div>;
   if (!post) return <div className="min-h-screen flex items-center justify-center"><p>Post not found</p></div>;
@@ -158,6 +195,14 @@ export default function PostDetail() {
                 <span className="font-medium">By {post.author.user_name}</span>
               </div>
             </div>
+            {userId === post.author.user_id && (
+              <button
+                onClick={handleDeletePost}
+                className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition text-sm font-medium"
+              >
+                Delete Post
+              </button>
+            )}
           </div>
 
           <p className="text-gray-700 text-lg leading-relaxed mb-6 whitespace-pre-wrap">
